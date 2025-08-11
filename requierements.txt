@@ -1,7 +1,7 @@
-playwright
-pandas
-google-auth
-google-auth-oauthlib
-google-auth-httplib2
-google-api-python-client
-python-dotenv
+playwright==1.42.0
+pandas==2.2.1
+google-api-python-client==2.123.0
+google-auth==2.27.0
+google-auth-oauthlib==1.2.0
+google-auth-httplib2==0.2.0
+python-dotenv==1.0.1
