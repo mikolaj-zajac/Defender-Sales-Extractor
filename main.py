@@ -94,34 +94,30 @@ def extract_ids_from_csv(csv_path):
     """Wyciąganie ID z CSV"""
     try:
         df = pd.read_csv(csv_path, encoding='utf-8')
-        if '@id' not in df.columns:
-            raise ValueError("Brak kolumny '@id' w pliku CSV")
-        return df['@id'].dropna().astype(str).tolist()
+        if '/sizes/size@code' not in df.columns:
+            raise ValueError("Brak kolumny '/sizes/size@code' w pliku CSV")
+        return df['/sizes/size@code'].dropna().astype(str).tolist()
     except Exception as e:
         raise Exception(f"Błąd przetwarzania CSV: {str(e)}")
 
 
 def upload_to_google_sheets(ids):
-    """Wysyłanie danych do Google Sheets z dwoma kolumnami"""
+    """Wysyłanie danych do Google Sheets"""
     try:
         service = get_gsheet_service()
 
-        combined_ids = "\n".join(ids)
+        values = [["id", "external_label_2"]]
+        values.extend([[pid, "wyp"] for pid in ids])
 
         body = {
-            'values': [
-                ["/sizes/size@code", "external_label_2"],
-                [combined_ids, "wyp"]
-            ]
+            'values': values
         }
-
         service.spreadsheets().values().update(
             spreadsheetId=SPREADSHEET_ID,
             range=RANGE_NAME,
-            valueInputOption="USER_ENTERED",
+            valueInputOption="RAW",
             body=body
         ).execute()
-
     except Exception as e:
         raise Exception(f"Błąd Google Sheets: {str(e)}")
 
