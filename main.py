@@ -1,5 +1,8 @@
 from __future__ import print_function
+
+import io
 import os.path
+import sys
 import time
 import pandas as pd
 from playwright.sync_api import sync_playwright
@@ -9,6 +12,8 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
 from dotenv import load_dotenv
+
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 load_dotenv()
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']

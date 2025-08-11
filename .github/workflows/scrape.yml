@@ -30,6 +30,7 @@ jobs:
 
     - name: Run export
       env:
+        PYTHONIOENCODING: UTF-8
         IAI_USERNAME: ${{ secrets.IAI_USERNAME }}
         IAI_PASSWORD: ${{ secrets.IAI_PASSWORD }}
         GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
