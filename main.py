@@ -1,60 +1,132 @@
-import pandas as pd
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-from playwright.sync_api import sync_playwright
+from __future__ import print_function
+import os.path
 import time
+import pandas as pd
+from playwright.sync_api import sync_playwright
+from pathlib import Path
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from google.auth.transport.requests import Request
+from dotenv import load_dotenv
 
-LOGIN_URL = "https://defender.iai-shop.com/panel/login.php"
-PRODUCTS_URL = "https://defender.iai-shop.com/panel/products-list.php?criteriaId=814951&filtersCount=2"
+load_dotenv()
+SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 
-USERNAME = "YOUR_USERNAME"
-PASSWORD = "YOUR_PASSWORD"
+LOGIN_URL = "https://defender.iai-shop.com/panel/products-search.php?form=extended"
+SEARCH_URL = "https://defender.iai-shop.com/panel/products-search.php?form=extended"
+USERNAME = os.getenv("IAI_USERNAME")
+PASSWORD = os.getenv("IAI_PASSWORD")
 
-GOOGLE_SHEET_NAME = "Product IDs"
-GOOGLE_WORKSHEET_NAME = "Sheet1"
+SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
+RANGE_NAME = "Arkusz1!A1"
 
-def login_and_download_csv():
+def init_auth_files():
+    Path("credentials.json").write_text(os.environ["GOOGLE_CREDENTIALS"])
+    Path("token.json").write_text(os.environ["GOOGLE_TOKEN"])
+
+def get_gsheet_service():
+    creds = None
+    if os.path.exists('token.json'):
+        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
+            creds = flow.run_local_server(port=0)
+        with open('token.json', 'w') as token:
+            token.write(creds.to_json())
+    return build('sheets', 'v4', credentials=creds)
+
+
+def perform_search_and_export():
+    """Wykonanie wyszukiwania i eksportu"""
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
-        page.goto(LOGIN_URL)
 
-        page.fill("input[name='login']", USERNAME)
-        page.fill("input[name='pass']", PASSWORD)
+        page.goto(LOGIN_URL)
+        page.fill("input[name='panel_login']", USERNAME)
+        page.fill("input[name='panel_password']", PASSWORD)
         page.click("button[type='submit']")
         page.wait_for_load_state("networkidle")
+        page.goto(SEARCH_URL)
 
-        page.goto(PRODUCTS_URL)
         time.sleep(2)
-        csv_button = page.locator("a[href*='export_csv']")
-        if csv_button.count() == 0:
-            raise Exception("CSV export button not found!")
-        csv_url = csv_button.get_attribute("href")
 
-        with page.expect_download() as download_info:
-            page.click(f"a[href='{csv_url}']")
+        page.click("label#fg_label_wsp1")
+        page.click("label#fg_label_przecb1")
+        page.click("input#deliveryButton")
+
+        time.sleep(30)
+
+        page.click("span.lbl")
+        page.click("a.nohref[onclick*='checkAllPage']")
+
+        time.sleep(10)
+
+        page.click("input#productsExportAction")
+        page.click("a#choice_export_toplayer2")
+        page.click("a.nohref:has-text('moto-tour.com.pl')")
+
+        downloads_dir = Path("downloads")
+        downloads_dir.mkdir(exist_ok=True)
+
+        with page.expect_download(timeout=600000) as download_info:
+            pass
+
         download = download_info.value
-        path = download.path()
+
+        csv_path = str(downloads_dir / "exported_products.csv")
+        download.save_as(csv_path)
+
         browser.close()
-        return path
+        return csv_path
+
 
 def extract_ids_from_csv(csv_path):
-    df = pd.read_csv(csv_path)
-    return df['ID'].dropna().astype(str).tolist()
+    """Wyciąganie ID z CSV"""
+    try:
+        df = pd.read_csv(csv_path, encoding='utf-8')
+        if '@id' not in df.columns:
+            raise ValueError("Brak kolumny '@id' w pliku CSV")
+        return df['@id'].dropna().astype(str).tolist()
+    except Exception as e:
+        raise Exception(f"Błąd przetwarzania CSV: {str(e)}")
+
 
 def upload_to_google_sheets(ids):
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name("service_account.json", scope)
-    client = gspread.authorize(creds)
+    """Wysyłanie danych do Google Sheets"""
+    try:
+        service = get_gsheet_service()
+        body = {
+            'values': [["id"]] + [[pid] for pid in ids]
+        }
+        service.spreadsheets().values().update(
+            spreadsheetId=SPREADSHEET_ID,
+            range=RANGE_NAME,
+            valueInputOption="RAW",
+            body=body
+        ).execute()
+    except Exception as e:
+        raise Exception(f"Błąd Google Sheets: {str(e)}")
 
-    sheet = client.open(GOOGLE_SHEET_NAME).worksheet(GOOGLE_WORKSHEET_NAME)
-    sheet.clear()
-    sheet.update("A1", [["Product ID"]])
-    for i, pid in enumerate(ids, start=2):
-        sheet.update_cell(i, 1, pid)
 
 if __name__ == "__main__":
-    csv_path = login_and_download_csv()
-    ids = extract_ids_from_csv(csv_path)
-    upload_to_google_sheets(ids)
-    print(f"Uploaded {len(ids)} IDs to Google Sheets.")
+    if os.getenv("GITHUB_ACTIONS") == "true":
+        init_auth_files()
+    try:
+        print("Rozpoczynanie procesu...")
+        csv_path = perform_search_and_export()
+        print(f"Pobrano plik: {csv_path}")
+
+        ids = extract_ids_from_csv(csv_path)
+        print(f"Znaleziono {len(ids)} ID produktów")
+
+        upload_to_google_sheets(ids)
+        print(f"Zaktualizowano Google Sheets. Wysłano {len(ids)} rekordów.")
+
+    except Exception as e:
+        print(f"BŁĄD: {str(e)}")
+        raise
