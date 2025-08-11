@@ -91,12 +91,18 @@ def perform_search_and_export():
 
 
 def extract_ids_from_csv(csv_path):
-    """Wyciąganie ID z CSV"""
+    """Wyciąganie ID z CSV, obsługa wielu ID w komórce"""
     try:
         df = pd.read_csv(csv_path, encoding='utf-8')
         if '/sizes/size@code' not in df.columns:
             raise ValueError("Brak kolumny '/sizes/size@code' w pliku CSV")
-        return df['/sizes/size@code'].dropna().astype(str).tolist()
+        all_ids = []
+        for cell_content in df['/sizes/size@code'].dropna().astype(str):
+            ids_in_cell = cell_content.split('\n')
+            all_ids.extend(ids_in_cell)
+
+        return all_ids
+
     except Exception as e:
         raise Exception(f"Błąd przetwarzania CSV: {str(e)}")
 
