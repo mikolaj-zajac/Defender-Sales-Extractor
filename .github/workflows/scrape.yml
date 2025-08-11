@@ -11,22 +11,20 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0  # Pobiera całą historię git (ważne dla śledzenia plików)
 
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
 
-    - name: Verify files
+    - name: Verify files (Windows compatible)
       run: |
-        ls -la  # Pokazuje zawartość folderu (do debugowania)
-        cat requirements.txt  # Wyświetla zawartość pliku
+        dir  
+        type requirements.txt  
 
     - name: Install dependencies
       run: |
-        pip install -r requirements.txt --no-cache-dir
+        python -m pip install -r requirements.txt
         python -m playwright install chromium
         python -m playwright install-deps
 
