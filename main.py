@@ -102,18 +102,26 @@ def extract_ids_from_csv(csv_path):
 
 
 def upload_to_google_sheets(ids):
-    """Wysyłanie danych do Google Sheets"""
+    """Wysyłanie danych do Google Sheets z dwoma kolumnami"""
     try:
         service = get_gsheet_service()
+
+        combined_ids = "\n".join(ids)
+
         body = {
-            'values': [["id"]] + [[pid] for pid in ids]
+            'values': [
+                ["/sizes/size@code", "external_label_2"],
+                [combined_ids, "wyp"]
+            ]
         }
+
         service.spreadsheets().values().update(
             spreadsheetId=SPREADSHEET_ID,
             range=RANGE_NAME,
-            valueInputOption="RAW",
+            valueInputOption="USER_ENTERED",
             body=body
         ).execute()
+
     except Exception as e:
         raise Exception(f"Błąd Google Sheets: {str(e)}")
 
