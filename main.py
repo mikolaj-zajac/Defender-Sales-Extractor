@@ -112,7 +112,7 @@ def upload_to_google_sheets(ids):
     try:
         service = get_gsheet_service()
 
-        values = [["id", "external_label_2"]]
+        values = [["id", "custom_label_2"]]
         values.extend([[pid, "wyp"] for pid in ids])
 
         body = {
