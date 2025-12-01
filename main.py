@@ -50,72 +50,6 @@ def get_gsheet_service():
     return build('sheets', 'v4', credentials=creds)
 
 
-def install_and_import_odfpy():
-    try:
-        import odfpy
-        return True
-    except ImportError:
-        try:
-            import subprocess
-            import sys
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "odfpy"])
-            import odfpy
-            return True
-        except:
-            return False
-
-
-def extract_ods_manual(ods_path):
-    try:
-        with zipfile.ZipFile(ods_path, 'r') as ods_zip:
-            file_list = ods_zip.namelist()
-
-            if 'content.xml' in file_list:
-                content_xml = ods_zip.read('content.xml')
-            else:
-                xml_files = [f for f in file_list if f.endswith('.xml')]
-                if not xml_files:
-                    return None
-                content_xml = ods_zip.read(xml_files[0])
-
-        try:
-            root = ET.fromstring(content_xml)
-        except:
-            content_xml_str = content_xml.decode('utf-8', errors='ignore')
-            root = ET.fromstring(content_xml_str)
-
-        ns = {
-            'office': 'urn:oasis:names:tc:opendocument:xmlns:office:1.0',
-            'table': 'urn:oasis:names:tc:opendocument:xmlns:table:1.0',
-            'text': 'urn:oasis:names:tc:opendocument:xmlns:text:1.0'
-        }
-
-        data = []
-
-        for row in root.findall('.//table:table-row', ns):
-            row_data = []
-            cells = row.findall('table:table-cell', ns)
-
-            for cell in cells:
-                text_elem = cell.find('text:p', ns)
-                if text_elem is not None and text_elem.text:
-                    row_data.append(text_elem.text.strip())
-                else:
-                    row_data.append('')
-
-            if any(row_data):
-                data.append(row_data)
-
-        if data:
-            headers = data[0] if len(data) > 1 else [f"Kolumna_{i}" for i in range(len(data[0]))]
-            df = pd.DataFrame(data[1:], columns=headers)
-            return df
-
-        return None
-    except:
-        return None
-
-
 def perform_report_extraction():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -193,15 +127,11 @@ def extract_ids_from_file(file_path):
         df = pd.read_excel(file_path)
 
     elif file_ext == 'ods':
-        odfpy_available = install_and_import_odfpy()
-
-        if odfpy_available:
+        try:
             import odfpy
             df = pd.read_excel(file_path, engine='odf')
-        else:
-            df = extract_ods_manual(file_path)
-            if df is None:
-                raise Exception("Nie udało się odczytać pliku ODS")
+        except ImportError:
+            raise Exception("odfpy nie jest zainstalowany")
     else:
         raise ValueError(f"Nieobsługiwany format: {file_ext}")
 
@@ -247,19 +177,19 @@ def upload_to_google_sheets(ids):
         service = get_gsheet_service()
 
         values = [["id", "custom_label_2"]]
-        values.extend([[pid, "wyp"] for pid in ids])
+        for pid in ids:
+            values.append([str(pid), "wyp"])
 
-        body = {'values': values}
+        body = {
+            'values': values,
+            'majorDimension': 'ROWS'
+        }
 
-        service.spreadsheets().values().clear(
-            spreadsheetId=SPREADSHEET_ID,
-            range=RANGE_NAME,
-        ).execute()
-
+        # Tylko update, bez clear - może brakuje uprawnień do clear
         result = service.spreadsheets().values().update(
             spreadsheetId=SPREADSHEET_ID,
             range=RANGE_NAME,
-            valueInputOption="RAW",
+            valueInputOption="USER_ENTERED",  # Zmiana na USER_ENTERED
             body=body
         ).execute()
 
