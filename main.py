@@ -50,63 +50,70 @@ def get_gsheet_service():
     return build('sheets', 'v4', credentials=creds)
 
 
-def install_odfpy():
+def install_and_import_odfpy():
     try:
         import odfpy
         return True
     except ImportError:
         try:
             import subprocess
+            import sys
             subprocess.check_call([sys.executable, "-m", "pip", "install", "odfpy"])
+            import odfpy
             return True
         except:
             return False
 
 
-def extract_ods_without_odfpy(ods_path):
-    with zipfile.ZipFile(ods_path, 'r') as ods_zip:
-        if 'content.xml' in ods_zip.namelist():
-            content_xml = ods_zip.read('content.xml')
-        else:
-            xml_files = [f for f in ods_zip.namelist() if f.endswith('.xml')]
-            if not xml_files:
-                return None
-            content_xml = ods_zip.read(xml_files[0])
-
+def extract_ods_manual(ods_path):
     try:
-        root = ET.fromstring(content_xml)
-    except:
-        content_xml_str = content_xml.decode('utf-8', errors='ignore')
-        root = ET.fromstring(content_xml_str)
+        with zipfile.ZipFile(ods_path, 'r') as ods_zip:
+            file_list = ods_zip.namelist()
 
-    ns = {
-        'office': 'urn:oasis:names:tc:opendocument:xmlns:office:1.0',
-        'table': 'urn:oasis:names:tc:opendocument:xmlns:table:1.0',
-        'text': 'urn:oasis:names:tc:opendocument:xmlns:text:1.0'
-    }
-
-    data = []
-
-    for row in root.findall('.//table:table-row', ns):
-        row_data = []
-        cells = row.findall('table:table-cell', ns)
-
-        for cell in cells:
-            text_elem = cell.find('text:p', ns)
-            if text_elem is not None and text_elem.text:
-                row_data.append(text_elem.text.strip())
+            if 'content.xml' in file_list:
+                content_xml = ods_zip.read('content.xml')
             else:
-                row_data.append('')
+                xml_files = [f for f in file_list if f.endswith('.xml')]
+                if not xml_files:
+                    return None
+                content_xml = ods_zip.read(xml_files[0])
 
-        if any(row_data):
-            data.append(row_data)
+        try:
+            root = ET.fromstring(content_xml)
+        except:
+            content_xml_str = content_xml.decode('utf-8', errors='ignore')
+            root = ET.fromstring(content_xml_str)
 
-    if data:
-        headers = data[0] if len(data) > 1 else [f"Kolumna_{i}" for i in range(len(data[0]))]
-        df = pd.DataFrame(data[1:], columns=headers)
-        return df
+        ns = {
+            'office': 'urn:oasis:names:tc:opendocument:xmlns:office:1.0',
+            'table': 'urn:oasis:names:tc:opendocument:xmlns:table:1.0',
+            'text': 'urn:oasis:names:tc:opendocument:xmlns:text:1.0'
+        }
 
-    return None
+        data = []
+
+        for row in root.findall('.//table:table-row', ns):
+            row_data = []
+            cells = row.findall('table:table-cell', ns)
+
+            for cell in cells:
+                text_elem = cell.find('text:p', ns)
+                if text_elem is not None and text_elem.text:
+                    row_data.append(text_elem.text.strip())
+                else:
+                    row_data.append('')
+
+            if any(row_data):
+                data.append(row_data)
+
+        if data:
+            headers = data[0] if len(data) > 1 else [f"Kolumna_{i}" for i in range(len(data[0]))]
+            df = pd.DataFrame(data[1:], columns=headers)
+            return df
+
+        return None
+    except:
+        return None
 
 
 def perform_report_extraction():
@@ -150,17 +157,12 @@ def perform_report_extraction():
         downloads_dir = Path("downloads")
         downloads_dir.mkdir(exist_ok=True)
 
-        if page.is_visible("a:has-text('Eksportuj do pliku w formacie CSV')"):
-            with page.expect_download(timeout=120000) as download_info:
-                page.click("a:has-text('Eksportuj do pliku w formacie CSV')")
-        else:
-            with page.expect_download(timeout=120000) as download_info:
-                page.click("a[onclick*='IAI.ods.export']:has-text('Eksportuj do pliku w formacie ODS')")
+        with page.expect_download(timeout=120000) as download_info:
+            page.click("a:has-text('Eksportuj do pliku w formacie ODS')")
 
         download = download_info.value
 
-        file_extension = download.suggested_filename.split('.')[-1] if download.suggested_filename else 'ods'
-        file_path = str(downloads_dir / f"sold_products.{file_extension}")
+        file_path = str(downloads_dir / "sold_products.ods")
         download.save_as(file_path)
 
         browser.close()
@@ -168,78 +170,76 @@ def perform_report_extraction():
 
 
 def extract_ids_from_file(file_path):
-    try:
-        file_ext = file_path.split('.')[-1].lower()
+    file_ext = file_path.split('.')[-1].lower()
 
-        if file_ext in ['csv', 'txt']:
-            encodings = ['utf-8', 'cp1250', 'iso-8859-2', 'windows-1250']
-            df = None
-            for encoding in encodings:
+    if file_ext in ['csv', 'txt']:
+        encodings = ['utf-8', 'cp1250', 'iso-8859-2', 'windows-1250']
+        df = None
+        for encoding in encodings:
+            try:
+                df = pd.read_csv(file_path, encoding=encoding, sep=';')
+                break
+            except:
                 try:
-                    df = pd.read_csv(file_path, encoding=encoding, sep=';')
+                    df = pd.read_csv(file_path, encoding=encoding, sep=',')
                     break
                 except:
-                    try:
-                        df = pd.read_csv(file_path, encoding=encoding, sep=',')
-                        break
-                    except:
-                        continue
+                    continue
 
-            if df is None:
-                df = pd.read_csv(file_path, sep=None, engine='python')
+        if df is None:
+            df = pd.read_csv(file_path, sep=None, engine='python')
 
-        elif file_ext in ['xls', 'xlsx']:
-            df = pd.read_excel(file_path)
+    elif file_ext in ['xls', 'xlsx']:
+        df = pd.read_excel(file_path)
 
-        elif file_ext == 'ods':
-            if install_odfpy():
-                import odfpy
-                df = pd.read_excel(file_path, engine='odf')
-            else:
-                df = extract_ods_without_odfpy(file_path)
-                if df is None:
-                    raise Exception("Nie udało się odczytać pliku ODS")
+    elif file_ext == 'ods':
+        odfpy_available = install_and_import_odfpy()
+
+        if odfpy_available:
+            import odfpy
+            df = pd.read_excel(file_path, engine='odf')
         else:
-            raise ValueError(f"Nieobsługiwany format: {file_ext}")
+            df = extract_ods_manual(file_path)
+            if df is None:
+                raise Exception("Nie udało się odczytać pliku ODS")
+    else:
+        raise ValueError(f"Nieobsługiwany format: {file_ext}")
 
-        if df.empty:
-            raise ValueError("Brak danych w pliku")
+    if df.empty:
+        raise ValueError("Brak danych w pliku")
 
-        id_column = None
-        for col in df.columns:
-            col_str = str(col).lower()
-            if any(keyword in col_str for keyword in ['iai', 'kod', 'code', 'id', 'sku', 'ean']):
-                id_column = col
-                break
+    id_column = None
+    for col in df.columns:
+        col_str = str(col).lower()
+        if any(keyword in col_str for keyword in ['iai', 'kod', 'code', 'id', 'sku', 'ean']):
+            id_column = col
+            break
 
-        if id_column is None:
-            id_column = df.columns[0]
+    if id_column is None:
+        id_column = df.columns[0]
 
-        ids = []
-        seen = set()
+    ids = []
+    seen = set()
 
-        for cell_content in df[id_column].dropna().astype(str):
-            cleaned_id = cell_content.strip()
+    for cell_content in df[id_column].dropna().astype(str):
+        cleaned_id = cell_content.strip()
 
-            if '\n' in cleaned_id or ',' in cleaned_id or ';' in cleaned_id:
-                separators = ['\n', ',', ';']
-                for sep in separators:
-                    if sep in cleaned_id:
-                        for sub_id in cleaned_id.split(sep):
-                            sub_id_clean = sub_id.strip()
-                            if sub_id_clean and sub_id_clean not in seen:
-                                ids.append(sub_id_clean)
-                                seen.add(sub_id_clean)
-                        break
-            else:
-                if cleaned_id and cleaned_id not in seen:
-                    ids.append(cleaned_id)
-                    seen.add(cleaned_id)
+        if '\n' in cleaned_id or ',' in cleaned_id or ';' in cleaned_id:
+            separators = ['\n', ',', ';']
+            for sep in separators:
+                if sep in cleaned_id:
+                    for sub_id in cleaned_id.split(sep):
+                        sub_id_clean = sub_id.strip()
+                        if sub_id_clean and sub_id_clean not in seen:
+                            ids.append(sub_id_clean)
+                            seen.add(sub_id_clean)
+                    break
+        else:
+            if cleaned_id and cleaned_id not in seen:
+                ids.append(cleaned_id)
+                seen.add(cleaned_id)
 
-        return ids
-
-    except Exception as e:
-        raise Exception(f"Błąd przetwarzania pliku: {str(e)}")
+    return ids
 
 
 def upload_to_google_sheets(ids):
@@ -279,10 +279,13 @@ if __name__ == "__main__":
         print("=" * 50)
 
         file_path = perform_report_extraction()
+        print(f"Pobrano plik: {file_path}")
+
         ids = extract_ids_from_file(file_path)
+        print(f"Znaleziono {len(ids)} ID produktów")
 
         upload_to_google_sheets(ids)
-        print(f"Proces zakończony. Przetworzono {len(ids)} produktów.")
+        print("Proces zakończony pomyślnie.")
 
     except Exception as e:
         print(f"BŁĄD: {str(e)}")
