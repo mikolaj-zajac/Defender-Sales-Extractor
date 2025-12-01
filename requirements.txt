@@ -5,3 +5,6 @@ google-auth==2.27.0
 google-auth-oauthlib==1.2.0
 google-auth-httplib2==0.2.0
 python-dotenv==1.0.1
+odfpy==1.4.1  # dodane dla obsługi ODS
+openpyxl==3.1.2  # dodane dla obsługi Excel
+xlrd==2.0.1  # dodane dla starszych formatów Excel

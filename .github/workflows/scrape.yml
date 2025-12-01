@@ -2,7 +2,7 @@ name: Nightly Export
 
 on:
   schedule:
-    - cron: '1 22 * * *'  # 00:01 czasu polskiego (CEST)
+    - cron: '1 22 * * *'  # 22:01 UTC = 00:01 czasu polskiego (CEST) latem, 23:01 zimą
   workflow_dispatch:
 
 jobs:
@@ -24,9 +24,10 @@ jobs:
 
     - name: Install dependencies
       run: |
+        python -m pip install --upgrade pip
         python -m pip install -r requirements.txt
         python -m playwright install chromium
-        python -m playwright install-deps
+        playwright install-deps
 
     - name: Run export
       env:
