@@ -20,7 +20,7 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 load_dotenv()
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 
-LOGIN_URL = "https://defender.net.pl/panel/login.php"
+LOGIN_URL = "https://defender.net.pl/panel/"
 REPORT_URL = "https://defender.net.pl/panel/reports-productssold.php"
 USERNAME = os.getenv("IAI_USERNAME")
 PASSWORD = os.getenv("IAI_PASSWORD")
