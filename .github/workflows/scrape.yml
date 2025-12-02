@@ -1,37 +1,72 @@
-name: Nightly Export
+name: Defender Sales Extractor
 
 on:
+  workflow_dispatch:  # Ręczne uruchomienie
   schedule:
-    - cron: '1 22 * * *'
-  workflow_dispatch:
+    - cron: '0 8 * * *'  # Codziennie o 8:00 UTC
+
+permissions:
+  contents: write
 
 jobs:
-  export:
-    runs-on: windows-latest
+  extract:
+    runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v4
       with:
         python-version: '3.11'
 
-    - name: Install dependencies
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          chromium-browser \
+          chromium-chromedriver \
+          libnss3 \
+          libgconf-2-4 \
+          libxss1 \
+          fonts-liberation \
+          libappindicator1 \
+          xdg-utils
+
+    - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install odfpy==1.4.1  # <-- DODAJ TĘ LINIĘ
         pip install -r requirements.txt
-        python -m playwright install chromium
-        playwright install-deps
 
-    - name: Run export
+    - name: Create downloads directory
+      run: mkdir -p downloads
+
+    - name: Run extraction script
       env:
-        PYTHONIOENCODING: UTF-8
-        IAI_USERNAME: ${{ secrets.IAI_USERNAME }}
-        IAI_PASSWORD: ${{ secrets.IAI_PASSWORD }}
-        GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
-        GOOGLE_TOKEN: ${{ secrets.GOOGLE_TOKEN }}
-        SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+        DEFENDER_USERNAME: ${{ secrets.DEFENDER_USERNAME }}
+        DEFENDER_PASSWORD: ${{ secrets.DEFENDER_PASSWORD }}
+        GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
+        GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
       run: |
         python main.py
+
+    - name: Upload extracted files
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: extracted-data
+        path: |
+          downloads/
+          *.xlsx
+          *.csv
+        retention-days: 30
+
+    - name: Commit and push results
+      if: success()
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add downloads/ *.xlsx *.csv
+        git commit -m "Update extracted data [skip ci]" || echo "No changes to commit"
+        git push
