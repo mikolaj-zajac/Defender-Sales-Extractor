@@ -54,6 +54,8 @@ def get_gsheet_service():
 def parse_ods_manually(ods_path):
     """Ręczne parsowanie pliku ODS bez odfpy"""
     try:
+        print(f"Parsuję ODS: {ods_path}")
+
         with zipfile.ZipFile(ods_path, 'r') as z:
             # Pobierz content.xml
             if 'content.xml' in z.namelist():
@@ -88,6 +90,8 @@ def parse_ods_manually(ods_path):
                 if text:
                     all_texts.append(text)
 
+        print(f"Znaleziono {len(all_texts)} fragmentów tekstu w ODS")
+
         # Szukaj ID (kody zawierające cyfry)
         ids = []
         for text in all_texts:
@@ -95,6 +99,7 @@ def parse_ods_manually(ods_path):
             if any(c.isdigit() for c in text) and 2 <= len(text) <= 50:
                 # Sprawdź czy to może być wiele ID
                 separators = ['\n', ',', ';', ' ', '/']
+                found_separator = False
                 for sep in separators:
                     if sep in text:
                         parts = [part.strip() for part in text.split(sep) if part.strip()]
@@ -102,8 +107,9 @@ def parse_ods_manually(ods_path):
                         for part in parts:
                             if any(c.isdigit() for c in part) and 2 <= len(part) <= 30:
                                 ids.append(part)
+                        found_separator = True
                         break
-                else:
+                if not found_separator:
                     # Pojedyncze ID
                     ids.append(text)
 
@@ -115,6 +121,7 @@ def parse_ods_manually(ods_path):
                 unique_ids.append(id)
                 seen.add(id)
 
+        print(f"Wyodrębniono {len(unique_ids)} unikalnych ID")
         return unique_ids
 
     except Exception as e:
@@ -126,16 +133,17 @@ def parse_ods_manually(ods_path):
 def parse_ods_simple(ods_path):
     """Proste parsowanie ODS - szuka kodów w tekście"""
     try:
+        print("Używam prostego parsowania ODS...")
+
         with zipfile.ZipFile(ods_path, 'r') as z:
             with z.open('content.xml') as f:
                 content = f.read().decode('utf-8', errors='ignore')
 
         # Szukaj wzorców które wyglądają jak ID produktów
-        # Format: kombinacja liter i cyfr, często z myślnikami lub podkreślnikami
         patterns = [
             r'\b[A-Za-z0-9\-_]{3,30}\b',  # Standardowe kody
-            r'\b\d{5,}\b',  # Same cyfry (5+)
-            r'\b[A-Z]{2,}\d{3,}\b',  # Litery + cyfry
+            r'\b\d{4,}\b',  # Same cyfry (4+)
+            r'\b[A-Z]{2,}\d{2,}\b',  # Litery + cyfry
             r'\b\d+[A-Z]+\d*\b',  # Cyfry + litery
         ]
 
@@ -151,7 +159,9 @@ def parse_ods_simple(ods_path):
                 ids.append(match)
 
         # Unikalne wartości
-        return list(set(ids))
+        unique_ids = list(set(ids))
+        print(f"Proste parsowanie znalazło {len(unique_ids)} ID")
+        return unique_ids
 
     except Exception as e:
         print(f"Błąd prostego parsowania: {e}")
@@ -199,6 +209,7 @@ def perform_report_extraction():
         downloads_dir = Path("downloads")
         downloads_dir.mkdir(exist_ok=True)
 
+        print("Pobieranie pliku ODS...")
         with page.expect_download(timeout=120000) as download_info:
             page.click("a:has-text('Eksportuj do pliku w formacie ODS')")
 
@@ -208,37 +219,46 @@ def perform_report_extraction():
         download.save_as(file_path)
 
         browser.close()
+        print(f"✓ Pobrano plik: {file_path}")
         return file_path
 
 
 def extract_ids_from_file(file_path):
     file_ext = file_path.split('.')[-1].lower()
+    print(f"Przetwarzam plik: {file_path} (format: {file_ext})")
 
     if file_ext in ['csv', 'txt']:
+        print("Przetwarzanie CSV...")
         encodings = ['utf-8', 'cp1250', 'iso-8859-2', 'windows-1250']
         df = None
         for encoding in encodings:
             try:
                 df = pd.read_csv(file_path, encoding=encoding, sep=';')
+                print(f"✓ Wczytano CSV z encoding={encoding}, separator=;")
                 break
             except:
                 try:
                     df = pd.read_csv(file_path, encoding=encoding, sep=',')
+                    print(f"✓ Wczytano CSV z encoding={encoding}, separator=,")
                     break
                 except:
                     continue
 
         if df is None:
             df = pd.read_csv(file_path, sep=None, engine='python')
+            print("✓ Wczytano CSV z auto-detection")
 
     elif file_ext in ['xls', 'xlsx']:
+        print("Przetwarzanie Excel...")
         df = pd.read_excel(file_path)
+        print("✓ Wczytano Excel")
 
     elif file_ext == 'ods':
-        # Użyj ręcznego parsowania zamiast odfpy
+        # Użyj ręcznego parsowania - NIE UŻYWA odfpy!
+        print("Przetwarzanie ODS (ręczne parsowanie)...")
         ids = parse_ods_manually(file_path)
         if ids:
-            print(f"Znaleziono {len(ids)} ID w ODS (ręczne parsowanie)")
+            print(f"✓ Znaleziono {len(ids)} ID w ODS")
             return ids
         else:
             raise ValueError("Nie znaleziono ID w pliku ODS")
@@ -248,15 +268,19 @@ def extract_ids_from_file(file_path):
     if df.empty:
         raise ValueError("Brak danych w pliku")
 
+    print(f"Wczytano {len(df)} wierszy, kolumny: {list(df.columns)}")
+
     id_column = None
     for col in df.columns:
         col_str = str(col).lower()
         if any(keyword in col_str for keyword in ['iai', 'kod', 'code', 'id', 'sku', 'ean']):
             id_column = col
+            print(f"✓ Znaleziono kolumnę ID: '{col}'")
             break
 
     if id_column is None:
         id_column = df.columns[0]
+        print(f"⚠ Używam pierwszej kolumny jako ID: '{id_column}'")
 
     ids = []
     seen = set()
@@ -279,11 +303,13 @@ def extract_ids_from_file(file_path):
                 ids.append(cleaned_id)
                 seen.add(cleaned_id)
 
+    print(f"Wyodrębniono {len(ids)} unikalnych ID")
     return ids
 
 
 def upload_to_google_sheets(ids):
     try:
+        print(f"Wysyłanie {len(ids)} ID do Google Sheets...")
         service = get_gsheet_service()
 
         values = [["id", "custom_label_2"]]
@@ -302,7 +328,8 @@ def upload_to_google_sheets(ids):
             body=body
         ).execute()
 
-        print(f"Zaktualizowano Google Sheets. Wysłano {len(ids)} rekordów.")
+        print(f"✓ Zaktualizowano Google Sheets. Wysłano {len(ids)} rekordów.")
+        print(f"✓ Zakres: {result.get('updatedRange')}")
 
     except Exception as e:
         raise Exception(f"Błąd Google Sheets: {str(e)}")
@@ -313,21 +340,27 @@ if __name__ == "__main__":
         init_auth_files()
 
     try:
-        print("=" * 50)
-        print(f"Rozpoczynanie procesu - {datetime.now()}")
-        print("=" * 50)
+        print("=" * 60)
+        print(f"ROZPOCZĘCIE PROCESU - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print("=" * 60)
 
         file_path = perform_report_extraction()
-        print(f"Pobrano plik: {file_path}")
-
         ids = extract_ids_from_file(file_path)
-        print(f"Znaleziono {len(ids)} ID produktów")
 
-        upload_to_google_sheets(ids)
-        print("Proces zakończony pomyślnie.")
+        if ids:
+            upload_to_google_sheets(ids)
+            print("=" * 60)
+            print("✓ PROCES ZAKOŃCZONY SUKCESEM")
+            print(f"✓ Przetworzono {len(ids)} produktów")
+            print("=" * 60)
+        else:
+            print("⚠ Brak danych do przesłania")
 
     except Exception as e:
-        print(f"BŁĄD: {str(e)}")
+        print("=" * 60)
+        print("✗ BŁĄD!")
+        print(f"✗ {str(e)}")
+        print("=" * 60)
         import traceback
 
         traceback.print_exc()
