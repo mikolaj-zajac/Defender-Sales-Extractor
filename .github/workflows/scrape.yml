@@ -20,7 +20,8 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        # INSTALUJ KAŻDĄ BIBLIOTEKĘ OSOBNO
+        pip install odfpy==1.4.1  
+        
         pip install playwright==1.42.0
         pip install pandas==2.2.1
         pip install google-api-python-client==2.123.0
@@ -28,7 +29,7 @@ jobs:
         pip install google-auth-oauthlib==1.2.0
         pip install google-auth-httplib2==0.2.0
         pip install python-dotenv==1.0.1
-        pip install odfpy==1.4.1  # <-- TO JEST KLUCZOWE
+        
         python -m playwright install chromium
         playwright install-deps
 
