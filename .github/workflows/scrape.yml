@@ -2,7 +2,7 @@ name: Nightly Export
 
 on:
   schedule:
-    - cron: '1 22 * * *'  # 22:01 UTC = 00:01 czasu polskiego (CEST) latem, 23:01 zimą
+    - cron: '1 22 * * *'
   workflow_dispatch:
 
 jobs:
@@ -17,15 +17,18 @@ jobs:
       with:
         python-version: '3.11'
 
-    - name: Verify files (Windows compatible)
-      run: |
-        dir  
-        type requirements.txt  
-
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        python -m pip install -r requirements.txt
+        # INSTALUJ KAŻDĄ BIBLIOTEKĘ OSOBNO
+        pip install playwright==1.42.0
+        pip install pandas==2.2.1
+        pip install google-api-python-client==2.123.0
+        pip install google-auth==2.27.0
+        pip install google-auth-oauthlib==1.2.0
+        pip install google-auth-httplib2==0.2.0
+        pip install python-dotenv==1.0.1
+        pip install odfpy==1.4.1  # <-- TO JEST KLUCZOWE
         python -m playwright install chromium
         playwright install-deps
 
