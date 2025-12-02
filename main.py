@@ -8,6 +8,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import zipfile
 import xml.etree.ElementTree as ET
+import re
 from playwright.sync_api import sync_playwright
 from pathlib import Path
 from google.oauth2.credentials import Credentials
@@ -48,6 +49,113 @@ def get_gsheet_service():
         with open('token.json', 'w') as token:
             token.write(creds.to_json())
     return build('sheets', 'v4', credentials=creds)
+
+
+def parse_ods_manually(ods_path):
+    """Ręczne parsowanie pliku ODS bez odfpy"""
+    try:
+        with zipfile.ZipFile(ods_path, 'r') as z:
+            # Pobierz content.xml
+            if 'content.xml' in z.namelist():
+                xml_content = z.read('content.xml')
+            else:
+                # Szukaj dowolnego XML
+                xml_files = [f for f in z.namelist() if f.endswith('.xml')]
+                if not xml_files:
+                    raise ValueError("Nie znaleziono plików XML w ODS")
+                xml_content = z.read(xml_files[0])
+
+        # Parsuj XML
+        try:
+            root = ET.fromstring(xml_content)
+        except ET.ParseError:
+            # Spróbuj naprawić encoding
+            xml_content_str = xml_content.decode('utf-8', errors='ignore')
+            root = ET.fromstring(xml_content_str)
+
+        # Namespace dla ODS
+        ns = {
+            'office': 'urn:oasis:names:tc:opendocument:xmlns:office:1.0',
+            'table': 'urn:oasis:names:tc:opendocument:xmlns:table:1.0',
+            'text': 'urn:oasis:names:tc:opendocument:xmlns:text:1.0'
+        }
+
+        # Zbierz wszystkie teksty
+        all_texts = []
+        for text_elem in root.findall('.//text:p', ns):
+            if text_elem.text:
+                text = text_elem.text.strip()
+                if text:
+                    all_texts.append(text)
+
+        # Szukaj ID (kody zawierające cyfry)
+        ids = []
+        for text in all_texts:
+            # Jeśli tekst zawiera cyfry i ma sensowną długość
+            if any(c.isdigit() for c in text) and 2 <= len(text) <= 50:
+                # Sprawdź czy to może być wiele ID
+                separators = ['\n', ',', ';', ' ', '/']
+                for sep in separators:
+                    if sep in text:
+                        parts = [part.strip() for part in text.split(sep) if part.strip()]
+                        # Dodaj tylko części które wyglądają jak ID
+                        for part in parts:
+                            if any(c.isdigit() for c in part) and 2 <= len(part) <= 30:
+                                ids.append(part)
+                        break
+                else:
+                    # Pojedyncze ID
+                    ids.append(text)
+
+        # Usuń duplikaty
+        unique_ids = []
+        seen = set()
+        for id in ids:
+            if id not in seen:
+                unique_ids.append(id)
+                seen.add(id)
+
+        return unique_ids
+
+    except Exception as e:
+        print(f"Błąd parsowania ODS: {e}")
+        # Fallback: prostsze parsowanie
+        return parse_ods_simple(ods_path)
+
+
+def parse_ods_simple(ods_path):
+    """Proste parsowanie ODS - szuka kodów w tekście"""
+    try:
+        with zipfile.ZipFile(ods_path, 'r') as z:
+            with z.open('content.xml') as f:
+                content = f.read().decode('utf-8', errors='ignore')
+
+        # Szukaj wzorców które wyglądają jak ID produktów
+        # Format: kombinacja liter i cyfr, często z myślnikami lub podkreślnikami
+        patterns = [
+            r'\b[A-Za-z0-9\-_]{3,30}\b',  # Standardowe kody
+            r'\b\d{5,}\b',  # Same cyfry (5+)
+            r'\b[A-Z]{2,}\d{3,}\b',  # Litery + cyfry
+            r'\b\d+[A-Z]+\d*\b',  # Cyfry + litery
+        ]
+
+        all_matches = []
+        for pattern in patterns:
+            matches = re.findall(pattern, content)
+            all_matches.extend(matches)
+
+        # Filtruj - tylko wartości które zawierają cyfry
+        ids = []
+        for match in all_matches:
+            if any(c.isdigit() for c in match):
+                ids.append(match)
+
+        # Unikalne wartości
+        return list(set(ids))
+
+    except Exception as e:
+        print(f"Błąd prostego parsowania: {e}")
+        return []
 
 
 def perform_report_extraction():
@@ -127,11 +235,13 @@ def extract_ids_from_file(file_path):
         df = pd.read_excel(file_path)
 
     elif file_ext == 'ods':
-        try:
-            import odfpy
-            df = pd.read_excel(file_path, engine='odf')
-        except ImportError:
-            raise Exception("odfpy nie jest zainstalowany")
+        # Użyj ręcznego parsowania zamiast odfpy
+        ids = parse_ods_manually(file_path)
+        if ids:
+            print(f"Znaleziono {len(ids)} ID w ODS (ręczne parsowanie)")
+            return ids
+        else:
+            raise ValueError("Nie znaleziono ID w pliku ODS")
     else:
         raise ValueError(f"Nieobsługiwany format: {file_ext}")
 
@@ -185,11 +295,10 @@ def upload_to_google_sheets(ids):
             'majorDimension': 'ROWS'
         }
 
-        # Tylko update, bez clear - może brakuje uprawnień do clear
         result = service.spreadsheets().values().update(
             spreadsheetId=SPREADSHEET_ID,
             range=RANGE_NAME,
-            valueInputOption="USER_ENTERED",  # Zmiana na USER_ENTERED
+            valueInputOption="USER_ENTERED",
             body=body
         ).execute()
 
