@@ -258,7 +258,7 @@ def extract_ids_from_file(file_path):
         print("✓ Wczytano Excel")
 
     elif file_ext == 'ods':
-        # UŻYJ RĘCZNEGO PARSOWANIA - BEZ odfpy!
+        # TYLKO RĘCZNE PARSOWANIE - BEZ IMPORTU odfpy!
         print("Przetwarzanie ODS (ręczne parsowanie)...")
         ids = parse_ods_manual(file_path)
         if ids:
@@ -275,7 +275,6 @@ def extract_ids_from_file(file_path):
     print(f"Wczytano {len(df)} wierszy")
     print(f"Kolumny: {list(df.columns)}")
 
-    # Szukaj kolumny z ID
     id_column = None
     for col in df.columns:
         col_str = str(col).lower()
@@ -288,7 +287,6 @@ def extract_ids_from_file(file_path):
         id_column = df.columns[0]
         print(f"⚠ Używam pierwszej kolumny: '{id_column}'")
 
-    # Wyodrębnij ID
     ids = []
     seen = set()
 
